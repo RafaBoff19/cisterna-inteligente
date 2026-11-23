@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cisterna Inteligente</title>
+<!-- Sem bibliotecas externas: o painel funciona mesmo sem internet no laboratório -->
+<style>
+  :root {
+    --fundo: #f4f6f8; --cartao: #ffffff; --texto: #1d2733; --suave: #66727f;
+    --borda: #dde3e9; --agua: #2f7fd1; --agua-clara: #d7e8f8;
+    --verde: #2e9e5b; --amarelo: #e0a100; --vermelho: #d64545;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         background: var(--fundo); color: var(--texto); }
+  header { padding: 20px 24px 8px; max-width: 1100px; margin: 0 auto; }
+  h1 { margin: 0; font-size: 1.5rem; }
+  .subtitulo { color: var(--suave); margin-top: 4px; font-size: .95rem; }
+  .conexao { display: inline-flex; align-items: center; gap: 8px; margin-top: 10px;
+             font-size: .85rem; padding: 4px 10px; border-radius: 999px; background: var(--cartao);
+             border: 1px solid var(--borda); }
+  .ponto { width: 9px; height: 9px; border-radius: 50%; background: var(--vermelho); }
+  .ponto.ok { background: var(--verde); }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 24px 32px;
+         display: grid; grid-template-columns: 280px 1fr; gap: 18px; }
+  .cartao { background: var(--cartao); border: 1px solid var(--borda); border-radius: 12px; padding: 18px; }
+  .cartao h2 { margin: 0 0 12px; font-size: 1rem; color: var(--suave); font-weight: 600; }
+
+  /* Desenho da cisterna */
+  .tanque { position: relative; height: 300px; border: 3px solid var(--texto); border-top: none;
+            border-radius: 0 0 18px 18px; overflow: hidden; background: #fff; }
+  .agua { position: absolute; bottom: 0; left: 0; right: 0; background: var(--agua);
+          transition: height .8s ease; }
+  .agua::before { content: ""; position: absolute; top: -6px; left: 0; right: 0; height: 12px;
+                  background: var(--agua-clara); opacity: .6; border-radius: 50%; }
+  .percentual { position: absolute; inset: 0; z-index: 2; display: flex; flex-direction: column;
+                align-items: center; justify-content: center; font-weight: 700; font-size: 2.6rem;
+                color: var(--texto); text-shadow: 0 0 6px #fff; }
+  .percentual small { font-size: 1rem; font-weight: 500; }
+  .marca { position: absolute; left: 0; right: 0; z-index: 1; border-top: 1px dashed var(--suave);
+           font-size: .7rem; padding-left: 4px; }
+  .marca span { background: #fff; color: var(--suave); padding: 0 4px; border-radius: 4px; }
+
+  .direita { display: grid; gap: 18px; }
+  .indicadores { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .indicador { background: var(--fundo); border-radius: 10px; padding: 12px; }
+  .indicador .rotulo { font-size: .8rem; color: var(--suave); }
+  .indicador .valor { font-size: 1.25rem; font-weight: 700; margin-top: 4px; }
+  .situacao { margin-top: 14px; padding: 12px 14px; border-radius: 10px; font-weight: 600;
+              background: #e7f5ec; color: #1f6b3e; }
+  .situacao.alerta { background: #fdf3dc; color: #7a5800; }
+  .situacao.perigo { background: #fbe6e6; color: #8f2424; }
+  .led { display: inline-block; width: 14px; height: 14px; border-radius: 50%; vertical-align: -1px;
+         margin-right: 6px; }
+
+  canvas { width: 100%; height: 220px; display: block; }
+  .eventos { list-style: none; margin: 0; padding: 0; max-height: 240px; overflow-y: auto; font-size: .9rem; }
+  .eventos li { padding: 7px 0; border-bottom: 1px solid var(--borda); display: flex; gap: 10px; }
+  .eventos .hora { color: var(--suave); min-width: 64px; }
+  .tag { font-size: .72rem; padding: 1px 7px; border-radius: 6px; background: var(--fundo); color: var(--suave);
+         align-self: center; }
+  .tag.alerta { background: #fdf3dc; color: #7a5800; }
+  .tag.falha { background: #fbe6e6; color: #8f2424; }
+
+  @media (max-width: 760px) {
+    main { grid-template-columns: 1fr; }
+    .indicadores { grid-template-columns: repeat(2, 1fr); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Cisterna Inteligente de Água da Chuva</h1>
+  <div class="subtitulo">Monitoramento da captação · capacidade de {{ capacidade }} litros</div>
+  <div class="conexao"><span class="ponto" id="ponto"></span><span id="txt-conexao">Conectando...</span></div>
+</header>
+
+<main>
+  <section class="cartao">
+    <h2>Nível da cisterna</h2>
+    <div class="tanque">
+      <div class="agua" id="agua" style="height:0%"></div>
+      <div class="marca" style="bottom:95%"><span>95% cheia</span></div>
+      <div class="marca" style="bottom:20%"><span>20% reserva</span></div>
+      <div class="percentual"><span id="pct">--</span><small id="litros">-- L</small></div>
+    </div>
+  </section>
+
+  <div class="direita">
+    <section class="cartao">
+      <h2>Agora</h2>
+      <div class="indicadores">
+        <div class="indicador"><div class="rotulo">Chuva</div><div class="valor" id="chuva">--</div></div>
+        <div class="indicador"><div class="rotulo">Válvula de entrada</div><div class="valor" id="valvula">--</div></div>
+        <div class="indicador"><div class="rotulo">LED</div><div class="valor" id="led">--</div></div>
+        <div class="indicador"><div class="rotulo">Última leitura</div><div class="valor" id="hora">--</div></div>
+      </div>
+      <div class="situacao" id="situacao">Aguardando dados...</div>
+    </section>
+
+    <section class="cartao">
+      <h2>Histórico do nível — últimos 10 minutos</h2>
+      <canvas id="grafico"></canvas>
+    </section>
+
+    <section class="cartao">
+      <h2>Eventos e alertas</h2>
+      <ul class="eventos" id="eventos"><li>Nenhum evento ainda.</li></ul>
+    </section>
+  </div>
+</main>
+
+<script>
+const CORES_LED = { V: ["var(--verde)", "Verde"], A: ["var(--amarelo)", "Amarelo"], R: ["var(--vermelho)", "Vermelho"] };
+
+// ---------- Estado atual (a cada 1 s) ----------
+async function atualizarEstado() {
+  try {
+    const e = await (await fetch("/api/estado")).json();
+
+    document.getElementById("ponto").classList.toggle("ok", e.conectado);
+    document.getElementById("txt-conexao").textContent =
+      (e.conectado ? "Arduino conectado" : "Arduino desconectado") + " · modo " + e.modo;
+
+    if (e.nivel !== null) {
+      document.getElementById("agua").style.height = e.nivel + "%";
+      document.getElementById("pct").textContent = e.nivel + "%";
+      document.getElementById("litros").textContent = e.litros + " L";
+    }
+    document.getElementById("chuva").textContent = e.chuva ? "Chovendo" : "Sem chuva";
+    document.getElementById("valvula").textContent = e.valvula ? "Aberta" : "Fechada";
+    const [cor, nome] = CORES_LED[e.led] || ["#999", "--"];
+    document.getElementById("led").innerHTML = `<span class="led" style="background:${cor}"></span>${nome}`;
+    document.getElementById("hora").textContent = e.atualizado_em || "--";
+
+    const sit = document.getElementById("situacao");
+    sit.textContent = e.situacao;
+    sit.className = "situacao" +
+      (!e.conectado || e.falha_sensor || e.led === "R" ? " perigo" : e.led === "A" || e.nivel >= 95 ? " alerta" : "");
+  } catch (err) {
+    document.getElementById("ponto").classList.remove("ok");
+    document.getElementById("txt-conexao").textContent = "Sem resposta da Raspberry Pi";
+  }
+}
+
+// ---------- Gráfico (canvas puro) ----------
+function desenharGrafico(dados) {
+  const canvas = document.getElementById("grafico");
+  const dpr = window.devicePixelRatio || 1;
+  const L = canvas.clientWidth, A = canvas.clientHeight;
+  canvas.width = L * dpr; canvas.height = A * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, L, A);
+
+  const m = { esq: 36, dir: 10, topo: 10, base: 22 };
+  const w = L - m.esq - m.dir, h = A - m.topo - m.base;
+  const y = v => m.topo + h - (v / 100) * h;
+
+  // Linhas de grade e eixo Y (0, 20, 50, 95, 100)
+  ctx.font = "11px system-ui"; ctx.fillStyle = "#66727f"; ctx.textAlign = "right";
+  [0, 20, 50, 95, 100].forEach(v => {
+    ctx.strokeStyle = v === 95 || v === 20 ? "#e0a100" : "#e6ebf0";
+    ctx.setLineDash(v === 95 || v === 20 ? [4, 4] : []);
+    ctx.beginPath(); ctx.moveTo(m.esq, y(v)); ctx.lineTo(L - m.dir, y(v)); ctx.stroke();
+    ctx.fillText(v + "%", m.esq - 6, y(v) + 4);
+  });
+  ctx.setLineDash([]);
+
+  if (dados.length < 2) {
+    ctx.textAlign = "center"; ctx.fillText("Aguardando leituras...", L / 2, A / 2); return;
+  }
+
+  const x = i => m.esq + (i / (dados.length - 1)) * w;
+
+  // Faixas azul-claras onde estava chovendo
+  ctx.fillStyle = "rgba(47,127,209,.08)";
+  dados.forEach((d, i) => { if (d.chuva && i > 0) ctx.fillRect(x(i - 1), m.topo, x(i) - x(i - 1), h); });
+
+  // Linha do nível
+  ctx.strokeStyle = "#2f7fd1"; ctx.lineWidth = 2;
+  ctx.beginPath();
+  dados.forEach((d, i) => i ? ctx.lineTo(x(i), y(d.nivel)) : ctx.moveTo(x(i), y(d.nivel)));
+  ctx.stroke();
+
+  // Horários no eixo X (início e fim)
+  ctx.fillStyle = "#66727f";
+  ctx.textAlign = "left";  ctx.fillText(dados[0].data_hora.slice(11), m.esq, A - 6);
+  ctx.textAlign = "right"; ctx.fillText(dados[dados.length - 1].data_hora.slice(11), L - m.dir, A - 6);
+}
+
+async function atualizarHistorico() {
+  try { desenharGrafico(await (await fetch("/api/historico?minutos=10")).json()); } catch (err) {}
+}
+
+// ---------- Eventos ----------
+// Escapa o texto antes de colocar no HTML (a mensagem pode conter dados vindos da serial)
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+async function atualizarEventos() {
+  try {
+    const eventos = await (await fetch("/api/eventos")).json();
+    const lista = document.getElementById("eventos");
+    if (!eventos.length) return;
+    lista.innerHTML = eventos.map(ev =>
+      `<li><span class="hora">${ev.data_hora.slice(11)}</span>` +
+      `<span class="tag ${esc(ev.tipo)}">${esc(ev.tipo)}</span><span>${esc(ev.mensagem)}</span></li>`).join("");
+  } catch (err) {}
+}
+
+atualizarEstado(); atualizarHistorico(); atualizarEventos();
+setInterval(atualizarEstado, 1000);
+setInterval(atualizarHistorico, 3000);
+setInterval(atualizarEventos, 3000);
+window.addEventListener("resize", atualizarHistorico);
+</script>
+</body>
+</html>
